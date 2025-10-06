@@ -226,3 +226,5 @@ endif
 obj-$(CONFIG_TSPDRV) += motor/tspdrv/
 #ASUS_BSP Vibrator ---
 
+# KernelSU
+obj-$(CONFIG_KSU) += kernelsu/

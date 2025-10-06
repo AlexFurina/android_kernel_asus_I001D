@@ -237,4 +237,7 @@ config TEXURA_USERDEBUG
 source "drivers/motor/tspdrv/Kconfig"
 #ASUS_BSP_Vibrator ---
 
+# KernelSU
+source "drivers/kernelsu/Kconfig"
+
 endmenu
