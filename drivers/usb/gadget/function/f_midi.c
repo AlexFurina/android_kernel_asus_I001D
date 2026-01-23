@@ -1046,7 +1046,8 @@ static int f_midi_bind(struct usb_configuration *c, struct usb_function *f)
 		midi_function[i++] = (struct usb_descriptor_header *)
 				     &ms_in_desc;
 		f->ss_descriptors = usb_copy_descriptors(midi_function);
-		if (!f->ss_descriptors)
+		f->ssp_descriptors = usb_copy_descriptors(midi_function);
+		if (!f->ss_descriptors || !f->ssp_descriptors)
 			goto fail_f_midi;
 	}
 
@@ -1221,7 +1222,7 @@ static ssize_t alsa_show(struct device *dev,
 
 	if (fi_midi && fi_midi->f) {
 		midi = func_to_midi(fi_midi->f);
-		if (midi->rmidi && midi->rmidi->card)
+		if (midi->rmidi && midi->card && midi->rmidi->card)
 			return sprintf(buf, "%d %d\n",
 			midi->rmidi->card->number, midi->rmidi->device);
 	}

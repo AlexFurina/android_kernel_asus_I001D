@@ -42,6 +42,8 @@
 #include <linux/cn_proc.h>
 #include <linux/compiler.h>
 #include <linux/posix-timers.h>
+#include <linux/oom.h>
+#include <linux/capability.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/signal.h>
@@ -52,6 +54,11 @@
 #include <asm/siginfo.h>
 #include <asm/cacheflush.h>
 #include "audit.h"	/* audit_signal_info() */
+
+#ifdef CONFIG_CGF_NOTIFY_EVENT
+#include <linux/cgroup.h>
+#include <linux/notifier.h>
+#endif
 
 /*
  * SLAB caches for signal bits.
@@ -867,6 +874,20 @@ static bool prepare_signal(int sig, struct task_struct *p, bool force)
 	struct task_struct *t;
 	sigset_t flush;
 
+#ifdef CONFIG_CGF_NOTIFY_EVENT
+	if (sig == SIGQUIT || sig == SIGABRT || sig == SIGKILL || sig == SIGSEGV) {
+		if (frozen(p) || freezing(p)){
+			struct cgf_event event;
+			//printk(KERN_DEBUG"[CGF] %s, sig: %d\n", __func__, sig);
+			event.info = signal;
+			event.data = p;
+			event.type = 2;
+			cgf_notifier_call_chain(sig, &event);
+		}
+	}
+#endif
+
+
 	if (signal->flags & (SIGNAL_GROUP_EXIT | SIGNAL_GROUP_COREDUMP)) {
 		if (!(signal->flags & SIGNAL_GROUP_EXIT))
 			return sig == SIGKILL;
@@ -1342,8 +1363,11 @@ int group_send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
 	ret = check_kill_permission(sig, info, p);
 	rcu_read_unlock();
 
-	if (!ret && sig)
+	if (!ret && sig) {
 		ret = do_send_sig_info(sig, info, p, true);
+		if (capable(CAP_KILL) && sig == SIGKILL)
+			add_to_oom_reaper(p);
+	}
 
 	return ret;
 }

@@ -11,6 +11,8 @@ obj-y				+= bus/
 
 obj-$(CONFIG_GENERIC_PHY)	+= phy/
 
+obj-$(CONFIG_VSERVICES_SUPPORT)	+= vservices/
+
 # GPIO must come after pinctrl as gpios may need to mux pins etc
 obj-$(CONFIG_PINCTRL)		+= pinctrl/
 obj-$(CONFIG_GPIOLIB)		+= gpio/
@@ -79,6 +81,7 @@ obj-$(CONFIG_DMA_SHARED_BUFFER) += dma-buf/
 obj-$(CONFIG_NUBUS)		+= nubus/
 obj-y				+= macintosh/
 obj-$(CONFIG_IDE)		+= ide/
+obj-$(CONFIG_CRYPTO)		+= crypto/
 obj-$(CONFIG_SCSI)		+= scsi/
 obj-y				+= nvme/
 obj-$(CONFIG_ATA)		+= ata/
@@ -86,6 +89,7 @@ obj-$(CONFIG_TARGET_CORE)	+= target/
 obj-$(CONFIG_MTD)		+= mtd/
 obj-$(CONFIG_SPI)		+= spi/
 obj-$(CONFIG_SPMI)		+= spmi/
+obj-$(CONFIG_SLIMBUS)		+= slimbus/
 obj-$(CONFIG_HSI)		+= hsi/
 obj-y				+= net/
 obj-$(CONFIG_ATM)		+= atm/
@@ -135,7 +139,6 @@ obj-$(CONFIG_NEW_LEDS)		+= leds/
 obj-$(CONFIG_INFINIBAND)	+= infiniband/
 obj-$(CONFIG_SGI_SN)		+= sn/
 obj-y				+= firmware/
-obj-$(CONFIG_CRYPTO)		+= crypto/
 obj-$(CONFIG_SUPERH)		+= sh/
 ifndef CONFIG_ARCH_USES_GETTIMEOFFSET
 obj-y				+= clocksource/
@@ -183,4 +186,43 @@ obj-$(CONFIG_FPGA)		+= fpga/
 obj-$(CONFIG_FSI)		+= fsi/
 obj-$(CONFIG_TEE)		+= tee/
 obj-$(CONFIG_MULTIPLEXER)	+= mux/
+obj-$(CONFIG_SENSORS_SSC)	+= sensors/
+obj-$(CONFIG_ESOC)              += esoc/
+# GNSS driver
+obj-$(CONFIG_GNSS_SIRF)		+= gnsssirf/
 obj-$(CONFIG_GNSS)		+= gnss/
+
+# ASUS_BSP Deeo : AURA SYNC driver
+obj-y				+= aura_sync/
+
+# ASUS_SZ_BSP Lotta_Lu +++ EC Driver
+obj-y				+= ec_hid_driver/
+# ASUS_SZ_BSP Lotta_Lu --- EC Driver
+
+
+# ASUS_SZ_BSP Cassie : gamepad aura +++
+obj-y				+= gamepad_hid_driver/
+# ASUS_SZ_BSP Cassie : gamepad aura ---
+# ASUS_BSP Bevis +++ dt_power Driver
+obj-y				+= dt_power/
+# ASUS_BSP Bevis --- dt_power Driver
+# ASUS_SZ_BSP Cassie: fan driver for dt+++
+obj-y               +=fan/
+# ASUS_SZ_BSP Cassie: fan driver for dt+++
+# ASUS_SZ_BSP Cassie: aura sync driver for dt+++
+obj-y               +=dt_aura/
+# ASUS_SZ_BSP Cassie: aura sync driver for dt---
+
+#Texura
+ifdef CONFIG_TEXURA_USERDEBUG
+	obj-y				+= ntfs/userdebug/
+	obj-y				+= exfat/userdebug/
+else
+	obj-y				+= ntfs/user/
+	obj-y				+= exfat/user/
+endif
+
+#ASUS_BSP Vibrator +++
+obj-$(CONFIG_TSPDRV) += motor/tspdrv/
+#ASUS_BSP Vibrator ---
+

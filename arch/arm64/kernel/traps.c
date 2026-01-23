@@ -38,6 +38,7 @@
 #include <linux/kasan.h>
 
 #include <asm/atomic.h>
+#include <asm/barrier.h>
 #include <asm/bug.h>
 #include <asm/cpufeature.h>
 #include <asm/debug-monitors.h>
@@ -50,6 +51,7 @@
 #include <asm/exception.h>
 #include <asm/system_misc.h>
 #include <asm/sysreg.h>
+#include <trace/events/exception.h>
 
 static const char *handler[]= {
 	"Synchronous Abort",
@@ -102,6 +104,9 @@ void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 {
 	struct stackframe frame;
 	int skip = 0;
+	long cur_state = 0;
+	unsigned long cur_sp = 0;
+	unsigned long cur_fp = 0;
 
 	pr_debug("%s(regs = %p tsk = %p)\n", __func__, regs, tsk);
 
@@ -126,6 +131,9 @@ void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 		 */
 		frame.fp = thread_saved_fp(tsk);
 		frame.pc = thread_saved_pc(tsk);
+		cur_state = tsk->state;
+		cur_sp = thread_saved_sp(tsk);
+		cur_fp = frame.fp;
 	}
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 	frame.graph = tsk->curr_ret_stack;
@@ -133,6 +141,23 @@ void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 
 	printk("Call trace:\n");
 	do {
+		if (tsk != current && (cur_state != tsk->state
+			/*
+			 * We would not be printing backtrace for the task
+			 * that has changed state from uninterruptible to
+			 * running before hitting the do-while loop but after
+			 * saving the current state. If task is in running
+			 * state before saving the state, then we may print
+			 * wrong call trace or end up in infinite while loop
+			 * if *(fp) and *(fp+8) are same. While the situation
+			 * will stop print when that task schedule out.
+			 */
+			|| cur_sp != thread_saved_sp(tsk)
+			|| cur_fp != thread_saved_fp(tsk))) {
+			printk("The task:%s had been rescheduled!\n",
+				tsk->comm);
+			break;
+		}
 		/* skip until specified stack frame */
 		if (!skip) {
 			dump_backtrace_entry(frame.pc);
@@ -157,6 +182,12 @@ void show_stack(struct task_struct *tsk, unsigned long *sp)
 	dump_backtrace(NULL, tsk);
 	barrier();
 }
+
+void dump_stack(void)
+{
+	dump_backtrace(NULL, NULL);
+}
+EXPORT_SYMBOL(dump_stack); //ASUS_BSP Deeo : add for SD Texura module +++
 
 #ifdef CONFIG_PREEMPT
 #define S_PREEMPT " PREEMPT"
@@ -198,8 +229,9 @@ static DEFINE_RAW_SPINLOCK(die_lock);
  */
 void die(const char *str, struct pt_regs *regs, int err)
 {
-	int ret;
+	int ret = 0;
 	unsigned long flags;
+	enum bug_trap_type bug_type = BUG_TRAP_TYPE_NONE;
 
 	raw_spin_lock_irqsave(&die_lock, flags);
 
@@ -209,6 +241,13 @@ void die(const char *str, struct pt_regs *regs, int err)
 	bust_spinlocks(1);
 	ret = __die(str, err, regs);
 
+       if (regs != NULL) {
+               if (!user_mode(regs))
+                       bug_type = report_bug(regs->pc, regs);
+               if (bug_type != BUG_TRAP_TYPE_NONE)
+                       str = "Oops - BUG";
+               ret = __die(str, err, regs);
+       }
 	if (regs && kexec_should_crash(current))
 		crash_kexec(regs);
 
@@ -216,10 +255,14 @@ void die(const char *str, struct pt_regs *regs, int err)
 	add_taint(TAINT_DIE, LOCKDEP_NOW_UNRELIABLE);
 	oops_exit();
 
-	if (in_interrupt())
+	if (in_interrupt()){
+		printk("DIE: in int %s", str);
 		panic("Fatal exception in interrupt");
-	if (panic_on_oops)
+	}
+	if (panic_on_oops){
+		printk("DIE: %s", str);
 		panic("Fatal exception");
+	}
 
 	raw_spin_unlock_irqrestore(&die_lock, flags);
 
@@ -280,10 +323,12 @@ static int call_undef_hook(struct pt_regs *regs)
 	int (*fn)(struct pt_regs *regs, u32 instr) = NULL;
 	void __user *pc = (void __user *)instruction_pointer(regs);
 
-	if (!user_mode(regs))
-		return 1;
-
-	if (compat_thumb_mode(regs)) {
+	if (!user_mode(regs)) {
+		__le32 instr_le;
+		if (probe_kernel_address((__force __le32 *)pc, instr_le))
+			goto exit;
+		instr = le32_to_cpu(instr_le);
+	} else if (compat_thumb_mode(regs)) {
 		/* 16-bit Thumb instruction */
 		__le16 instr_le;
 		if (get_user(instr_le, (__le16 __user *)pc))
@@ -369,6 +414,8 @@ void arm64_notify_segfault(struct pt_regs *regs, unsigned long addr)
 
 asmlinkage void __exception do_undefinstr(struct pt_regs *regs)
 {
+	void __user *pc = (void __user *)instruction_pointer(regs);
+
 	/* check for AArch32 breakpoint instructions */
 	if (!aarch32_break_handler(regs))
 		return;
@@ -376,7 +423,10 @@ asmlinkage void __exception do_undefinstr(struct pt_regs *regs)
 	if (call_undef_hook(regs) == 0)
 		return;
 
+	trace_undef_instr(regs, pc);
+
 	force_signal_inject(SIGILL, ILL_ILLOPC, regs, 0);
+	BUG_ON(!user_mode(regs));
 }
 
 void cpu_enable_cache_maint_trap(const struct arm64_cpu_capabilities *__unused)
@@ -454,6 +504,7 @@ static void cntvct_read_handler(unsigned int esr, struct pt_regs *regs)
 {
 	int rt = (esr & ESR_ELx_SYS64_ISS_RT_MASK) >> ESR_ELx_SYS64_ISS_RT_SHIFT;
 
+	isb();
 	pt_regs_write_reg(regs, rt, arch_counter_get_cntvct());
 	arm64_skip_faulting_instruction(regs, AARCH64_INSN_SIZE);
 }
@@ -517,6 +568,124 @@ asmlinkage void __exception do_sysinstr(unsigned int esr, struct pt_regs *regs)
 	do_undefinstr(regs);
 }
 
+#ifdef CONFIG_COMPAT
+static void cntfrq_cp15_32_read_handler(unsigned int esr, struct pt_regs *regs)
+{
+	int rt =
+	  (esr & ESR_ELx_CP15_32_ISS_RT_MASK) >> ESR_ELx_CP15_32_ISS_RT_SHIFT;
+	int cv =
+	  (esr & ESR_ELx_CP15_32_ISS_CV_MASK) >> ESR_ELx_CP15_32_ISS_CV_SHIFT;
+	int cond =
+	  (esr & ESR_ELx_CP15_32_ISS_COND_MASK) >>
+		ESR_ELx_CP15_32_ISS_COND_SHIFT;
+	bool read_reg = 1;
+
+	if (rt == 13 && !compat_arm_instr_set(regs))
+		read_reg = 0;
+
+	if (cv && cond != 0xf &&
+	    !(*aarch32_opcode_cond_checks[cond])(regs->pstate & 0xffffffff))
+		read_reg = 0;
+
+	if (read_reg)
+		regs->regs[rt] = read_sysreg(cntfrq_el0);
+	regs->pc += 4;
+}
+
+struct cp15_32_hook {
+	unsigned int esr_mask;
+	unsigned int esr_val;
+	void (*handler)(unsigned int esr, struct pt_regs *regs);
+};
+
+static struct cp15_32_hook cp15_32_hooks[] = {
+	{
+		/* Trap CP15 AArch32 read access to CNTFRQ_EL0 */
+		.esr_mask = ESR_ELx_CP15_32_ISS_SYS_OP_MASK,
+		.esr_val = ESR_ELx_CP15_32_ISS_SYS_CNTFRQ,
+		.handler = cntfrq_cp15_32_read_handler,
+	},
+	{},
+};
+
+asmlinkage void __exception do_cp15_32_instr_compat(unsigned int esr,
+						    struct pt_regs *regs)
+{
+	struct cp15_32_hook *hook;
+
+	for (hook = cp15_32_hooks; hook->handler; hook++)
+		if ((hook->esr_mask & esr) == hook->esr_val) {
+			hook->handler(esr, regs);
+			return;
+		}
+
+	force_signal_inject(SIGILL, ILL_ILLOPC, regs, 0);
+}
+
+static void cntvct_cp15_64_read_handler(unsigned int esr, struct pt_regs *regs)
+{
+	int rt =
+	  (esr & ESR_ELx_CP15_64_ISS_RT_MASK) >> ESR_ELx_CP15_64_ISS_RT_SHIFT;
+	int rt2 =
+	  (esr & ESR_ELx_CP15_64_ISS_RT2_MASK) >> ESR_ELx_CP15_64_ISS_RT2_SHIFT;
+	int cv =
+	  (esr & ESR_ELx_CP15_64_ISS_CV_MASK) >> ESR_ELx_CP15_64_ISS_CV_SHIFT;
+	int cond =
+	  (esr & ESR_ELx_CP15_64_ISS_COND_MASK) >>
+		ESR_ELx_CP15_64_ISS_COND_SHIFT;
+	bool read_reg = 1;
+
+	if (rt == 15 || rt2 == 15 || rt == rt2)
+		read_reg = 0;
+
+	if ((rt == 13 || rt2 == 13) && !compat_arm_instr_set(regs))
+		read_reg = 0;
+
+	if (cv && cond != 0xf &&
+	    !(*aarch32_opcode_cond_checks[cond])(regs->pstate & 0xffffffff))
+		read_reg = 0;
+
+	if (read_reg) {
+		u64 cval =  arch_counter_get_cntvct();
+
+		regs->regs[rt] = cval & 0xffffffff;
+		regs->regs[rt2] = cval >> 32;
+	}
+	regs->pc += 4;
+}
+
+struct cp15_64_hook {
+	unsigned int esr_mask;
+	unsigned int esr_val;
+	void (*handler)(unsigned int esr, struct pt_regs *regs);
+};
+
+static struct cp15_64_hook cp15_64_hooks[] = {
+	{
+		/* Trap CP15 AArch32 read access to CNTVCT_EL0 */
+		.esr_mask = ESR_ELx_CP15_64_ISS_SYS_OP_MASK,
+		.esr_val = ESR_ELx_CP15_64_ISS_SYS_CNTVCT,
+		.handler = cntvct_cp15_64_read_handler,
+	},
+	{},
+};
+
+asmlinkage void __exception do_cp15_64_instr_compat(unsigned int esr,
+						    struct pt_regs *regs)
+{
+	struct cp15_64_hook *hook;
+
+	for (hook = cp15_64_hooks; hook->handler; hook++)
+		if ((hook->esr_mask & esr) == hook->esr_val) {
+			hook->handler(esr, regs);
+			return;
+		}
+
+	force_signal_inject(SIGILL, ILL_ILLOPC, regs, 0);
+}
+
+#endif
+
 long compat_arm_syscall(struct pt_regs *regs);
 
 asmlinkage long do_ni_syscall(struct pt_regs *regs)
@@ -552,6 +721,7 @@ static const char *esr_class_str[] = {
 	[ESR_ELx_EC_HVC64]		= "HVC (AArch64)",
 	[ESR_ELx_EC_SMC64]		= "SMC (AArch64)",
 	[ESR_ELx_EC_SYS64]		= "MSR/MRS (AArch64)",
+	[ESR_ELx_EC_SVE]		= "SVE",
 	[ESR_ELx_EC_IMP_DEF]		= "EL3 IMP DEF",
 	[ESR_ELx_EC_IABT_LOW]		= "IABT (lower EL)",
 	[ESR_ELx_EC_IABT_CUR]		= "IABT (current EL)",

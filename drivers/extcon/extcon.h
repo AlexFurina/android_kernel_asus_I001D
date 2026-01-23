@@ -48,6 +48,7 @@ struct extcon_dev {
 	struct device dev;
 	struct raw_notifier_head nh_all;
 	struct raw_notifier_head *nh;
+	struct blocking_notifier_head *bnh;
 	struct list_head entry;
 	int max_supported;
 	spinlock_t lock;	/* could be called by irq handler */
@@ -61,6 +62,8 @@ struct extcon_dev {
 	struct attribute_group attr_g_muex;
 	struct attribute **attrs_muex;
 	struct device_attribute *d_attrs_muex;
+
+	const char *fnode_name;	/* ASUS BSP +++ */
 };
 
 #endif /* __LINUX_EXTCON_INTERNAL_H__ */

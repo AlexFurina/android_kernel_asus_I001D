@@ -1180,6 +1180,27 @@ static void destroy_device_list(struct f2fs_sb_info *sbi)
 	kvfree(sbi->devs);
 }
 
+static void f2fs_umount_end(struct super_block *sb, int flags)
+{
+	/*
+	 * this is called at the end of umount(2). If there is an unclosed
+	 * namespace, f2fs won't do put_super() which triggers fsck in the
+	 * next boot.
+	 */
+	if ((flags & MNT_FORCE) || atomic_read(&sb->s_active) > 1) {
+		/* to write the latest kbytes_written */
+		if (!(sb->s_flags & MS_RDONLY)) {
+			struct f2fs_sb_info *sbi = F2FS_SB(sb);
+			struct cp_control cpc = {
+				.reason = CP_UMOUNT,
+			};
+			down_write(&sbi->gc_lock);
+			f2fs_write_checkpoint(F2FS_SB(sb), &cpc);
+			up_write(&sbi->gc_lock);
+		}
+	}
+}
+
 static void f2fs_put_super(struct super_block *sb)
 {
 	struct f2fs_sb_info *sbi = F2FS_SB(sb);
@@ -1275,10 +1296,14 @@ static void f2fs_put_super(struct super_block *sb)
 	kvfree(sbi);
 }
 
+extern int is_suspend; // ASUS_BSP : For debug suspend sync fs
 int f2fs_sync_fs(struct super_block *sb, int sync)
 {
 	struct f2fs_sb_info *sbi = F2FS_SB(sb);
 	int err = 0;
+
+	if (is_suspend)
+		printk("[SYS_SYNC] f2fs_sync_fs start, sync %d, is_suspend %d\n", sync, is_suspend);
 
 	if (unlikely(f2fs_cp_error(sbi)))
 		return 0;
@@ -1300,6 +1325,9 @@ int f2fs_sync_fs(struct super_block *sb, int sync)
 		up_write(&sbi->gc_lock);
 	}
 	f2fs_trace_ios(NULL, 1);
+
+	if (is_suspend)
+		printk("[SYS_SYNC] f2fs_sync_fs done, err %d\n", err);
 
 	return err;
 }
@@ -2435,6 +2463,7 @@ static const struct super_operations f2fs_sops = {
 #endif
 	.evict_inode	= f2fs_evict_inode,
 	.put_super	= f2fs_put_super,
+	.umount_end	= f2fs_umount_end,
 	.sync_fs	= f2fs_sync_fs,
 	.freeze_fs	= f2fs_freeze,
 	.unfreeze_fs	= f2fs_unfreeze,

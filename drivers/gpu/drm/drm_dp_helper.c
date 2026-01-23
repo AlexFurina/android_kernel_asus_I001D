@@ -119,18 +119,32 @@ u8 drm_dp_get_adjust_request_pre_emphasis(const u8 link_status[DP_LINK_STATUS_SI
 EXPORT_SYMBOL(drm_dp_get_adjust_request_pre_emphasis);
 
 void drm_dp_link_train_clock_recovery_delay(const u8 dpcd[DP_RECEIVER_CAP_SIZE]) {
-	if (dpcd[DP_TRAINING_AUX_RD_INTERVAL] == 0)
+	int rd_interval = dpcd[DP_TRAINING_AUX_RD_INTERVAL] &
+			  DP_TRAINING_AUX_RD_MASK;
+
+	if (rd_interval > 4)
+		DRM_DEBUG_KMS("AUX interval %d, out of range (max 4)\n",
+			      rd_interval);
+
+	if (rd_interval == 0 || dpcd[DP_DPCD_REV] >= DP_DPCD_REV_14)
 		udelay(100);
 	else
-		mdelay(dpcd[DP_TRAINING_AUX_RD_INTERVAL] * 4);
+		mdelay(rd_interval * 4);
 }
 EXPORT_SYMBOL(drm_dp_link_train_clock_recovery_delay);
 
 void drm_dp_link_train_channel_eq_delay(const u8 dpcd[DP_RECEIVER_CAP_SIZE]) {
-	if (dpcd[DP_TRAINING_AUX_RD_INTERVAL] == 0)
+	int rd_interval = dpcd[DP_TRAINING_AUX_RD_INTERVAL] &
+			  DP_TRAINING_AUX_RD_MASK;
+
+	if (rd_interval > 4)
+		DRM_DEBUG_KMS("AUX interval %d, out of range (max 4)\n",
+			      rd_interval);
+
+	if (rd_interval == 0)
 		udelay(400);
 	else
-		mdelay(dpcd[DP_TRAINING_AUX_RD_INTERVAL] * 4);
+		mdelay(rd_interval * 4);
 }
 EXPORT_SYMBOL(drm_dp_link_train_channel_eq_delay);
 
@@ -144,6 +158,8 @@ u8 drm_dp_link_rate_to_bw_code(int link_rate)
 		return DP_LINK_BW_2_7;
 	case 540000:
 		return DP_LINK_BW_5_4;
+	case 810000:
+		return DP_LINK_BW_8_1;
 	}
 }
 EXPORT_SYMBOL(drm_dp_link_rate_to_bw_code);
@@ -158,11 +174,27 @@ int drm_dp_bw_code_to_link_rate(u8 link_bw)
 		return 270000;
 	case DP_LINK_BW_5_4:
 		return 540000;
+	case DP_LINK_BW_8_1:
+		return 810000;
 	}
 }
 EXPORT_SYMBOL(drm_dp_bw_code_to_link_rate);
 
 #define AUX_RETRY_INTERVAL 500 /* us */
+
+extern volatile enum POGO_ID ASUS_POGO_ID;
+enum POGO_ID {
+    NO_INSERT = 0,
+    INBOX,
+    STATION,
+    DT,
+    PCIE,
+    ERROR_1,
+    OTHER,
+};
+
+extern bool g_hpd;
+extern bool is_in_dp_disconnect;
 
 /**
  * DOC: dp helpers
@@ -223,6 +255,16 @@ static int drm_dp_dpcd_access(struct drm_dp_aux *aux, u8 request,
 		 */
 		if (!err)
 			err = ret;
+
+	    if (ASUS_POGO_ID == 200) {
+	        pr_err("Station unlocked.\n");
+	        goto unlock;
+	    }
+
+	    if (is_in_dp_disconnect && !g_hpd) {
+	        pr_err("dp disconnect, do not retry.\n");
+	        goto unlock;
+	    }
 	}
 
 	DRM_DEBUG_KMS("Too many retries, giving up. First error: %d\n", err);
@@ -354,19 +396,12 @@ EXPORT_SYMBOL(drm_dp_link_probe);
  */
 int drm_dp_link_power_up(struct drm_dp_aux *aux, struct drm_dp_link *link)
 {
-	u8 value;
+	u8 value = DP_SET_POWER_D0;
 	int err;
 
 	/* DP_SET_POWER register is only available on DPCD v1.1 and later */
 	if (link->revision < 0x11)
 		return 0;
-
-	err = drm_dp_dpcd_readb(aux, DP_SET_POWER, &value);
-	if (err < 0)
-		return err;
-
-	value &= ~DP_SET_POWER_MASK;
-	value |= DP_SET_POWER_D0;
 
 	err = drm_dp_dpcd_writeb(aux, DP_SET_POWER, value);
 	if (err < 0)

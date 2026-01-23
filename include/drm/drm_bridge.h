@@ -92,6 +92,22 @@ struct drm_bridge_funcs {
 	 */
 	enum drm_mode_status (*mode_valid)(struct drm_bridge *crtc,
 					   const struct drm_display_mode *mode);
+	/**
+	 * @connector_init:
+	 *
+	 * This callback is used to init the connector from bridge side. In some
+	 * cases connector and bridge are created in different modules, and the
+	 * connector ops might need extra info from bridge. This callback offers
+	 * the opportunity to overwrite connector's behavior in external bridge.
+	 *
+	 * The connector_init callback is optional.
+	 *
+	 * RETURNS:
+	 *
+	 * Zero on success, error code on failure.
+	 */
+	int (*connector_init)(struct drm_bridge *bridge,
+				struct drm_connector *connector);
 
 	/**
 	 * @mode_fixup:
@@ -220,6 +236,9 @@ struct drm_bridge_funcs {
 	 * The enable callback is optional.
 	 */
 	void (*enable)(struct drm_bridge *bridge);
+	
+	/* ASUS BSP Display +++ */
+	void (*asusFps)(struct drm_bridge *bridge, int type);
 };
 
 /**
@@ -263,6 +282,8 @@ void drm_bridge_mode_set(struct drm_bridge *bridge,
 			struct drm_display_mode *adjusted_mode);
 void drm_bridge_pre_enable(struct drm_bridge *bridge);
 void drm_bridge_enable(struct drm_bridge *bridge);
+int drm_bridge_connector_init(struct drm_bridge *bridge,
+	struct drm_connector *connector);
 
 #ifdef CONFIG_DRM_PANEL_BRIDGE
 struct drm_bridge *drm_panel_bridge_add(struct drm_panel *panel,
@@ -273,4 +294,6 @@ struct drm_bridge *devm_drm_panel_bridge_add(struct device *dev,
 					     u32 connector_type);
 #endif
 
+/* ASUS BSP Display +++ */
+void drm_bridge_asusFps(struct drm_bridge *bridge, int type);
 #endif

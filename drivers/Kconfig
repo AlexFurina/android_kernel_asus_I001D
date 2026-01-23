@@ -61,6 +61,8 @@ source "drivers/spi/Kconfig"
 
 source "drivers/spmi/Kconfig"
 
+source "drivers/slimbus/Kconfig"
+
 source "drivers/hsi/Kconfig"
 
 source "drivers/pps/Kconfig"
@@ -70,6 +72,8 @@ source "drivers/ptp/Kconfig"
 source "drivers/pinctrl/Kconfig"
 
 source "drivers/gpio/Kconfig"
+
+source "drivers/gnsssirf/Kconfig"
 
 source "drivers/w1/Kconfig"
 
@@ -137,6 +141,8 @@ source "drivers/hv/Kconfig"
 
 source "drivers/xen/Kconfig"
 
+source "drivers/vservices/Kconfig"
+
 source "drivers/staging/Kconfig"
 
 source "drivers/platform/Kconfig"
@@ -170,6 +176,8 @@ source "drivers/ntb/Kconfig"
 source "drivers/vme/Kconfig"
 
 source "drivers/pwm/Kconfig"
+
+source "drivers/gpu/msm/Kconfig"
 
 source "drivers/irqchip/Kconfig"
 
@@ -212,5 +220,21 @@ source "drivers/fsi/Kconfig"
 source "drivers/tee/Kconfig"
 
 source "drivers/mux/Kconfig"
+
+source "drivers/sensors/Kconfig"
+
+source "drivers/esoc/Kconfig"
+
+config TEXURA_USERDEBUG
+	bool "Texura userdebug module for ASUS ZS660KL"
+	depends on NLS_UTF8
+	default n
+	help
+	  Say Y here if you want support Texura userdebug module at ZE500KL
+	  Say N here if you want support Texura user module at ZE500KL
+
+#ASUS_BSP_Vibrator +++, mark_guo
+source "drivers/motor/tspdrv/Kconfig"
+#ASUS_BSP_Vibrator ---
 
 endmenu

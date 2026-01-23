@@ -162,6 +162,32 @@ void drm_bridge_detach(struct drm_bridge *bridge)
 }
 
 /**
+ * drm_bridge_connector_init - call bridge's connector_init callback to allow
+ *                     the bridge to update connector's behavior.
+ * @bridge: bridge control structure
+ * @connector: connector control structure
+ *
+ * Calls ->connector_init() &drm_bridge_funcs op for the bridge.
+ *
+ * RETURNS:
+ * Zero on success, error code on failure
+ */
+int drm_bridge_connector_init(struct drm_bridge *bridge,
+	struct drm_connector *connector)
+{
+	int ret = 0;
+
+	if (!bridge || !connector)
+		return -EINVAL;
+
+	if (bridge->funcs->connector_init)
+		ret = bridge->funcs->connector_init(bridge, connector);
+
+	return ret;
+}
+EXPORT_SYMBOL(drm_bridge_connector_init);
+
+/**
  * DOC: bridge callbacks
  *
  * The &drm_bridge_funcs ops are populated by the bridge driver. The DRM
@@ -381,6 +407,21 @@ struct drm_bridge *of_drm_find_bridge(struct device_node *np)
 }
 EXPORT_SYMBOL(of_drm_find_bridge);
 #endif
+
+/* ASUS BSP Display +++ */
+void drm_bridge_asusFps(struct drm_bridge *bridge, int type)
+{
+	if (!bridge)
+		return;
+
+	if (bridge->funcs->asusFps)
+		bridge->funcs->asusFps(bridge, type);
+
+	drm_bridge_asusFps(bridge->next, type);
+
+}
+EXPORT_SYMBOL(drm_bridge_asusFps);
+/* ASUS BSP Display --- */
 
 MODULE_AUTHOR("Ajay Kumar <ajaykumar.rs@samsung.com>");
 MODULE_DESCRIPTION("DRM bridge infrastructure");
